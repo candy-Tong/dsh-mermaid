@@ -55,7 +55,20 @@ export declare const OVERLAY_CLASS = "dsh-mermaid-overlay";
 export declare const STAGE_CLASS = "dsh-mermaid-stage";
 /** Class toggled on the stage while a middle-button pan drag is active. */
 export declare const STAGE_DRAGGING_CLASS = "dsh-mermaid-dragging";
-/** Whether `block` is a mermaid fence (infostring text is exactly `mermaid`). */
+/**
+ * Visible banner text. Older DSH builds put the fence language in an
+ * `infostring` span. Current builds pass `toolbarLabels` into every markdown
+ * `CodeBlock` (chat and file preview), and `CodeToolbar` replaces a language
+ * shiki cannot highlight — including `mermaid` — with the localized generic
+ * title. The real language is not stored on the node.
+ */
+export declare function bannerLabel(block: HTMLElement): string;
+/** Whether `source` opens like a mermaid diagram rather than plain code. */
+export declare function looksLikeMermaid(source: string): boolean;
+/**
+ * Whether `block` should render as a diagram: an explicit `mermaid` label, or
+ * a generic code card whose source opens as a mermaid diagram.
+ */
 export declare function isMermaidBlock(block: HTMLElement): boolean;
 /** The fence source: the `<pre>` text minus the trailing newline CodeBlock trims on display. */
 export declare function fenceSource(block: HTMLElement): string;
@@ -152,13 +165,11 @@ export declare function ensureZoomButton(block: HTMLElement): void;
  */
 export declare function openOverlay(block: HTMLElement): void;
 /**
- * Process every currently-settled mermaid fence in the document: register it
- * with the lazy viewport observer (or enqueue it directly when the observer is
- * unavailable) rather than rendering immediately. Settled-only by
- * construction: while a message streams, CodeBlock renders fences with an
- * empty infostring (lang is suppressed mid-stream), so the infostring test
- * never matches until the settle pass — the same policy the product applies
- * to KaTeX.
+ * Process every mermaid fence in the document: register a labeled fence
+ * immediately, and wait until a sniffed fence's source settles. Labeled
+ * fences used to be settled-only because streaming left the infostring empty;
+ * current DSH shows the generic code title for `mermaid` even while
+ * streaming, so the sniff path supplies that settle wait instead.
  * @param env - the render environment.
  */
 export declare function scan(env: MermaidRenderEnv): void;

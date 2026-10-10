@@ -19,7 +19,7 @@
 ## 工作方式
 
 - **Host 半部**（`src/index.ts`）：注册 `webServer` 前缀路由 `/mermaid-dist`，从插件自己的 `node_modules/mermaid` 惰性提供 UMD 构建，并提供固定的 `config.json` 端点。
-- **Client 半部**（`src/client/`）：监听会话 DOM，把 infostring 为 `mermaid` 的围栏渲染为 SVG：
+- **Client 半部**（`src/client/`）：监听会话 DOM，把横幅为 `mermaid` 的围栏渲染为 SVG。当前 DSH 会把没有语法高亮的语言（包括 `mermaid`）显示成「代码块」/ `Code block`，这时改为识别源码开头是否为 mermaid 图：
   1. 只处理**已定格**的围栏（流式输出期间不渲染）；
   2. 首次遇到围栏才惰性加载 mermaid（浏览器缓存一次）；
   3. **视口驱动渲染**：围栏进入视口（带 300px 预加载余量）才开始渲染，滚到哪渲染到哪；还在排队/加载中离开视口的图会停止渲染，回到视口再继续；
@@ -90,6 +90,6 @@ dsh plugin --profile web remove dsh-mermaid
 
 ## 已知限制
 
-- 依赖主前端 `CodeBlock` 的稳定钩子（字面量类 `md-code-block` 与 infostring 文本）；上游渲染器重构时需要同步更新选择器。
-- 流式输出期间不渲染，定格后才渲染。
+- 依赖主前端 `CodeBlock` 的稳定钩子（字面量类 `md-code-block`、infostring 文本，以及当前构建的 `data-code-block-banner` 语言标题）；上游渲染器重构时需要同步更新选择器。
+- 横幅明确写着 `mermaid` 时立即渲染。横幅只是通用「代码块」时，要等源码停稳约 0.4 秒再渲染，避免流式输出画到一半就被标成失败。
 - `securityLevel: strict` 下 mermaid 的点击交互不可用。

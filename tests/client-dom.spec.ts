@@ -33,6 +33,25 @@ function mermaidBlock(source: string): HTMLElement {
   return block
 }
 
+/** Current DSH file-preview fence: no infostring, generic code-card title. */
+function genericBlock(label: string, source: string): HTMLElement {
+  const block = document.createElement('div')
+  block.className = `_block_abc ${CODE_BLOCK_SELECTOR.slice(1)}`
+  const banner = document.createElement('div')
+  banner.setAttribute('data-code-block-banner', '')
+  const language = document.createElement('span')
+  language.className = '_language_abc'
+  language.textContent = label
+  banner.append(language)
+  const pre = document.createElement('pre')
+  const code = document.createElement('code')
+  code.textContent = source
+  pre.append(code)
+  block.append(banner, pre)
+  document.body.append(block)
+  return block
+}
+
 /** A plain (non-mermaid) fence: infostring says `ts`. */
 function tsBlock(source: string): HTMLElement {
   const block = document.createElement('div')
@@ -189,11 +208,32 @@ describe('isMermaidBlock', () => {
     expect(isMermaidBlock(tsBlock('const x = 1'))).toBe(false)
   })
 
-  it('rejects a streaming fence (empty infostring)', () => {
+  it('sniffs an unlabeled fence whose source opens as mermaid', () => {
     const block = mermaidBlock('graph TD')
     const info = block.querySelector<HTMLElement>(`[class*="${INFOSTRING_SEGMENT}"]`)
     info!.textContent = ''
+    expect(isMermaidBlock(block)).toBe(true)
+  })
+
+  it('rejects an unlabeled fence whose source is not a diagram', () => {
+    const block = mermaidBlock('const x = 1')
+    const info = block.querySelector<HTMLElement>(`[class*="${INFOSTRING_SEGMENT}"]`)
+    info!.textContent = ''
     expect(isMermaidBlock(block)).toBe(false)
+  })
+
+  it('matches a generic code card whose source opens as mermaid', () => {
+    const source = '%%{init: {"theme":"base"}}%%\nsequenceDiagram\n  A->>B: hi'
+    expect(isMermaidBlock(genericBlock('代码块', source))).toBe(true)
+    expect(isMermaidBlock(genericBlock('Code block', 'flowchart LR\n  A-->B'))).toBe(true)
+  })
+
+  it('rejects a highlighted language even when the source looks like mermaid', () => {
+    expect(isMermaidBlock(genericBlock('ts', 'sequenceDiagram\n  A->>B: hi'))).toBe(false)
+  })
+
+  it('rejects prose that merely starts with graph', () => {
+    expect(isMermaidBlock(genericBlock('代码块', 'graph something'))).toBe(false)
   })
 })
 
@@ -266,6 +306,28 @@ describe('renderBlock', () => {
 })
 
 describe('scan (lazy viewport rendering)', () => {
+  it('waits for a generic code card to settle before rendering it', async () => {
+    const block = genericBlock('代码块', 'sequenceDiagram\n  A->>B: hi')
+    scan(env())
+    expect(block.querySelector(`.${HOST_CLASS}`)).toBeNull()
+    await vi.waitFor(() => {
+      expect(block.querySelector(`.${HOST_CLASS}`)).not.toBeNull()
+    }, { timeout: 1500 })
+  })
+
+  it('restarts the settle wait while a sniffed fence is still changing', async () => {
+    const block = genericBlock('代码块', 'sequenceDiagram')
+    scan(env())
+    await new Promise(resolve => window.setTimeout(resolve, 200))
+    block.querySelector('code')!.textContent = 'sequenceDiagram\n  A->>B: hi'
+    scan(env())
+    await new Promise(resolve => window.setTimeout(resolve, 250))
+    expect(block.hasAttribute(RENDERED_ATTR)).toBe(false)
+    await vi.waitFor(() => {
+      expect(block.hasAttribute(RENDERED_ATTR)).toBe(true)
+    }, { timeout: 1500 })
+  })
+
   it('renders settled mermaid fences and leaves other fences alone', async () => {
     const mermaid = mermaidBlock('graph TD; A-->B')
     const ts = tsBlock('const x = 1')

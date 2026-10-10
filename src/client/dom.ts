@@ -58,10 +58,48 @@ export const STAGE_CLASS = 'dsh-mermaid-stage'
 /** Class toggled on the stage while a middle-button pan drag is active. */
 export const STAGE_DRAGGING_CLASS = 'dsh-mermaid-dragging'
 
-/** Whether `block` is a mermaid fence (infostring text is exactly `mermaid`). */
-export function isMermaidBlock(block: HTMLElement): boolean {
+/**
+ * Visible banner text. Older DSH builds put the fence language in an
+ * `infostring` span. Current builds pass `toolbarLabels` into every markdown
+ * `CodeBlock` (chat and file preview), and `CodeToolbar` replaces a language
+ * shiki cannot highlight — including `mermaid` — with the localized generic
+ * title. The real language is not stored on the node.
+ */
+export function bannerLabel(block: HTMLElement): string {
   const info = block.querySelector<HTMLElement>(`[class*="${INFOSTRING_SEGMENT}"]`)
-  return info?.textContent?.trim() === 'mermaid'
+  if (info !== null) return info.textContent?.trim() ?? ''
+  return block.querySelector<HTMLElement>('[data-code-block-banner] [class*="language"]')?.textContent?.trim() ?? ''
+}
+
+/** Generic code-card title used when the fence language has no grammar. */
+const GENERIC_CODE_LABELS = new Set(['代码块', 'Code block'])
+
+/**
+ * Diagram openers mermaid accepts. Checked only when the banner does not name
+ * a real language, so a highlighted fence is never sniffed. `%%{init}%%` and a
+ * YAML frontmatter may precede the keyword.
+ */
+const MERMAID_HEADER = /^(?:%%\{[\s\S]*?\}%%\s*)?(?:---\s*[\s\S]*?---\s*)?(?:sequenceDiagram|flowchart(?:-v2)?|graph(?:\s+(?:TB|TD|BT|RL|LR)\b)|classDiagram(?:-v2)?|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie(?:\s+title\b|\s+showData\b)|gitGraph|mindmap|timeline|quadrantChart|requirementDiagram|C4(?:Context|Container|Component|Dynamic|Deployment)|sankey(?:-beta)?|xychart(?:-beta)?|block(?:-beta)?|packet(?:-beta)?|architecture(?:-beta)?|kanban|radar(?:-beta)?|treemap)\b/
+
+/** Whether `source` opens like a mermaid diagram rather than plain code. */
+export function looksLikeMermaid(source: string): boolean {
+  return MERMAID_HEADER.test(source.trimStart())
+}
+
+/** Whether the banner itself still says `mermaid` (older DSH builds). */
+function isLabeledMermaid(block: HTMLElement): boolean {
+  return bannerLabel(block) === 'mermaid'
+}
+
+/**
+ * Whether `block` should render as a diagram: an explicit `mermaid` label, or
+ * a generic code card whose source opens as a mermaid diagram.
+ */
+export function isMermaidBlock(block: HTMLElement): boolean {
+  if (isLabeledMermaid(block)) return true
+  const label = bannerLabel(block)
+  if (label !== '' && !GENERIC_CODE_LABELS.has(label)) return false
+  return looksLikeMermaid(fenceSource(block))
 }
 
 /** The fence source: the `<pre>` text minus the trailing newline CodeBlock trims on display. */
@@ -732,34 +770,84 @@ export function openOverlay(block: HTMLElement): void {
 
 // --- scan -------------------------------------------------------------------
 
+/** How long a sniffed fence must keep the same source before rendering. */
+const SNIFF_SETTLE_MS = 400
+
+/** Sniffed block → the source it last saw and the pending settle timer. */
+const sniffTimers = new Map<HTMLElement, { source: string, timer: ReturnType<typeof setTimeout> }>()
+
+/** Drop a pending sniff timer, if this block has one. */
+function clearSniff(block: HTMLElement): void {
+  const prev = sniffTimers.get(block)
+  if (prev === undefined) return
+  clearTimeout(prev.timer)
+  sniffTimers.delete(block)
+}
+
 /**
- * Process every currently-settled mermaid fence in the document: register it
- * with the lazy viewport observer (or enqueue it directly when the observer is
- * unavailable) rather than rendering immediately. Settled-only by
- * construction: while a message streams, CodeBlock renders fences with an
- * empty infostring (lang is suppressed mid-stream), so the infostring test
- * never matches until the settle pass — the same policy the product applies
- * to KaTeX.
+ * Register one confirmed mermaid fence with the lazy viewport observer.
+ * @param block - the `.md-code-block` element.
+ */
+function adoptBlock(block: HTMLElement): void {
+  if (block.hasAttribute(ERROR_ATTR)) return
+  if (trackedBlocks.has(block)) return
+  const observer = ensureObserver()
+  trackedBlocks.add(block)
+  if (block.hasAttribute(RENDERED_ATTR)) {
+    // Already rendered: observed so a theme flip can refresh it on re-entry.
+    if (observer !== undefined) observer.observe(block)
+    return
+  }
+  const source = fenceSource(block)
+  if (source === '') return
+  pendingSources.set(block, source)
+  if (observer !== undefined) observer.observe(block)
+  else enqueueRender(block, 'initial')
+}
+
+/**
+ * Render a sniffed fence only after its source stops changing, so a chat
+ * token stream is not sent to mermaid (and then permanently marked failed)
+ * before the fence settles. A file preview is already stable, so it renders
+ * one settle delay later.
+ * @param block - the `.md-code-block` element.
+ */
+function scheduleSniff(block: HTMLElement): void {
+  const source = fenceSource(block)
+  if (source === '') return
+  const prev = sniffTimers.get(block)
+  if (prev !== undefined && prev.source === source) return
+  if (prev !== undefined) clearTimeout(prev.timer)
+  const timer = setTimeout(() => {
+    sniffTimers.delete(block)
+    if (!block.isConnected || fenceSource(block) !== source || !isMermaidBlock(block)) return
+    adoptBlock(block)
+  }, SNIFF_SETTLE_MS)
+  sniffTimers.set(block, { source, timer })
+}
+
+/**
+ * Process every mermaid fence in the document: register a labeled fence
+ * immediately, and wait until a sniffed fence's source settles. Labeled
+ * fences used to be settled-only because streaming left the infostring empty;
+ * current DSH shows the generic code title for `mermaid` even while
+ * streaming, so the sniff path supplies that settle wait instead.
  * @param env - the render environment.
  */
 export function scan(env: MermaidRenderEnv): void {
   activeEnv = env
-  const observer = ensureObserver()
+  ensureObserver()
   for (const block of document.querySelectorAll<HTMLElement>(CODE_BLOCK_SELECTOR)) {
-    if (!isMermaidBlock(block)) continue
-    if (block.hasAttribute(ERROR_ATTR)) continue
-    if (trackedBlocks.has(block)) continue
-    trackedBlocks.add(block)
-    if (block.hasAttribute(RENDERED_ATTR)) {
-      // Already rendered: observed so a theme flip can refresh it on re-entry.
-      if (observer !== undefined) observer.observe(block)
+    if (isLabeledMermaid(block)) {
+      clearSniff(block)
+      adoptBlock(block)
       continue
     }
-    const source = fenceSource(block)
-    if (source === '') continue
-    pendingSources.set(block, source)
-    if (observer !== undefined) observer.observe(block)
-    else enqueueRender(block, 'initial')
+    if (!isMermaidBlock(block)) {
+      clearSniff(block)
+      continue
+    }
+    scheduleSniff(block)
   }
 }
 
@@ -772,6 +860,8 @@ export function scan(env: MermaidRenderEnv): void {
 export function dispose(): void {
   currentOverlay?.()
   currentOverlay = null
+  for (const prev of sniffTimers.values()) clearTimeout(prev.timer)
+  sniffTimers.clear()
   lazyObserver?.disconnect()
   lazyObserver = undefined
   renderQueue.length = 0

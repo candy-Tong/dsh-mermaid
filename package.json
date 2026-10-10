@@ -1,11 +1,11 @@
 {
   "name": "dsh-mermaid",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Render ```mermaid fences in DSH Web conversation messages as interactive-free SVG diagrams (lazy-loaded, strict security).",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/AKS1st/dsh-mermaid.git"
+    "url": "git+https://github.com/candy-Tong/dsh-mermaid.git"
   },
   "main": "./lib/index.js",
   "types": "./lib/types/index.d.ts",

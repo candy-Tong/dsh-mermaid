@@ -19,7 +19,7 @@ The zoom overlay auto-fits the diagram to the screen (near full-screen with a sm
 ## How it works
 
 - **Host half** (`src/index.ts`): registers the `webServer` prefix route `/mermaid-dist`, lazily serves the mermaid UMD build from the plugin's own `node_modules/mermaid`, and exposes a fixed `config.json` endpoint.
-- **Client half** (`src/client/`): watches the conversation DOM and renders fences whose infostring is `mermaid` to SVG:
+- **Client half** (`src/client/`): watches the conversation DOM and renders fences whose banner says `mermaid` to SVG. Current DSH shows a language shiki cannot highlight — including `mermaid` — as the generic title "代码块" / `Code block`, so those fences are recognized by whether the source opens as a mermaid diagram:
   1. Only **settled** fences are processed (nothing renders mid-stream);
   2. The mermaid bundle is loaded lazily on first use (cached by the browser afterwards);
   3. **Viewport-driven rendering**: a fence only starts rendering when it scrolls into view (with a 300px preload margin) — render where you look; a diagram that leaves the viewport while queued or loading stops rendering and resumes on re-entry;
@@ -90,6 +90,6 @@ Override with `- set:` or `- update:` in the profile's `cordis.patch.yml`.
 
 ## Known limitations
 
-- Depends on the host frontend `CodeBlock`'s stable hooks (the literal `md-code-block` class and the infostring text); selectors need to be kept in sync if the upstream renderer is refactored.
-- Nothing renders during streaming; rendering happens after a message settles.
+- Depends on the host frontend `CodeBlock`'s stable hooks (the literal `md-code-block` class, the infostring text, and the current build's `data-code-block-banner` language title); selectors need to be kept in sync if the upstream renderer is refactored.
+- A banner that literally says `mermaid` renders immediately. A generic code-card title waits until the source stays unchanged for about 0.4s, so a streaming fence is not rendered halfway and then locked as a failure.
 - Under `securityLevel: strict`, mermaid's click interactions are unavailable.

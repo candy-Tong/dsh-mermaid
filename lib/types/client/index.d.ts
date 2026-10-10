@@ -6,7 +6,8 @@
  * grammar), so this plugin post-processes the settled message DOM:
  *
  *   1. A MutationObserver watches the conversation for `.md-code-block`
- *      elements whose infostring is `mermaid`.
+ *      elements whose banner says `mermaid`, or whose banner is the generic
+ *      code title and whose source opens as a mermaid diagram.
  *   2. The mermaid UMD build is loaded lazily (once) from the host route.
  *      Rendering itself is viewport-driven: a fence only renders when it
  *      scrolls into view (with a small preload margin), diagrams render one
